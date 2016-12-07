@@ -21,8 +21,9 @@ Key | Description | Type | Default | Required
 
 Key | Description | Type | Default | Required
 --- | ----------- | ---- | ------- | --------
-`children` | Children callflows | `object` | `null` | `false`
-`data` | The data/arguments of the callflow module | `object` | `null` | `true`
+`children` | Children callflows | `object` | `{}` | `false`
+`children./.+/` |   | [#/definitions/callflows.action](#callflowsaction) |   | `false`
+`data` | The data/arguments of the callflow module | `object` | `{}` | `true`
 `module` | The name of the callflow module to excute at this node | `string(1..64)` |   | `true`
 
 ##### metaflow

@@ -6,6 +6,11 @@
         "children": {
             "default": {},
             "description": "Children callflows",
+            "patternProperties": {
+                ".+": {
+                    "$ref": "callflows.action"
+                }
+            },
             "required": false,
             "type": "object"
         },
