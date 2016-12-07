@@ -40,8 +40,6 @@
             orelse Prefix == <<"88*">>
        ).
 
--define(DEFAULT_E911_FEATURE, ?DASH_KEY).
-
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
