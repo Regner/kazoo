@@ -157,7 +157,7 @@ validate(Doc) ->
     end.
 
 -spec validate_flow(doc()) -> {'ok', doc()} |
-                              {'error', list()}.
+                              {'error', kz_json_schema:validation_errors()}.
 validate_flow(Doc) ->
     case validate_flow_elements(flow(Doc)) of
         {Flow, []} -> {'ok', set_flow(Doc, Flow)};
@@ -167,6 +167,7 @@ validate_flow(Doc) ->
 
 -type validate_acc() :: {kz_json:object(), [jesse_error:error_reason()]}.
 -spec validate_flow_elements(kz_json:object()) -> validate_acc().
+-spec validate_flow_elements(kz_json:object(), validate_acc(), ne_binaries()) -> validate_acc().
 validate_flow_elements(Flow) ->
     validate_flow_elements(Flow, {Flow, []}, []).
 
@@ -178,7 +179,6 @@ validate_flow_elements(Flow, Acc, Path) ->
 
     validate_action_schema(Module, Data, Children, Acc, Path).
 -else.
--spec validate_flow_elements(kz_json:object(), validate_acc(), ne_binaries()) -> validate_acc().
 validate_flow_elements(Flow, Acc, Path) ->
     case kz_json_schema:validate(<<"callflows.action">>, Flow) of
         {'ok', ValidatedFlow} ->
@@ -191,6 +191,7 @@ validate_flow_elements(Flow, Acc, Path) ->
             {Flow, Errors}
     end.
 -endif.
+
 -spec validate_action_schema(api_binary(), api_object(), kz_json:object(), validate_acc(), ne_binaries()) ->
                                     validate_acc().
 validate_action_schema(Module, Data, Children, {RootFlow, ErrorsSoFar}, Path) ->
