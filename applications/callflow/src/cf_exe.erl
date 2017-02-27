@@ -473,7 +473,11 @@ handle_cast('initialize', #state{call=Call}=State) ->
                ],
     CallWithHelpers = lists:foldr(fun(F, C) -> F(C) end, Call, Updaters),
     _ = kz_util:spawn(fun cf_singular_call_hooks:maybe_hook_call/1, [CallWithHelpers]),
-    {'noreply', State#state{call=CallWithHelpers
+    add_event_listener(CallWithHelpers, {'callflow_event_listener', []}),
+    {'ok', Pid} = cf_util:start_event_listener(CallWithHelpers, 'callflow_event_listener', []),
+    CallWithEventListenerPid = callflow_event_listener:set_pid(CallWithHelpers, Pid),
+    callflow_event_listener:route_win(CallWithEventListenerPid, Flow),
+    {'noreply', State#state{call=CallWithEventListenerPid
                            ,flow=Flow
                            }};
 handle_cast({'gen_listener', {'created_queue', Q}}, #state{call=Call}=State) ->
@@ -677,6 +681,7 @@ maybe_start_cf_module(ModuleBin, Data, Call) ->
     try CFModule:module_info('exports') of
         _ ->
             lager:info("moving to action '~s'", [CFModule]),
+            callflow_event_listener:executing_element(Call, Data, CFModule),
             spawn_cf_module(CFModule, Data, Call)
     catch
         'error':'undef' ->
