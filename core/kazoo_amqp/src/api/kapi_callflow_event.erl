@@ -7,7 +7,6 @@
 %%%-------------------------------------------------------------------
 -module(kapi_callflow_event).
 
--export([build_generic_proplist/3]).
 -export([bind_q/2, unbind_q/2]).
 -export([declare_exchanges/0]).
 -export([event/1, event_v/1, publish_event/2]).
@@ -44,25 +43,6 @@
 
 -define(EVENT_VALUES, [{<<"Event-Category">>, <<"callflow_evt">>}]).
 -define(EVENT_TYPES, []).
-
--spec build_generic_proplist(kapps_call:call(), atom(), atom()) -> kz_proplist().
-build_generic_proplist(Call, AppName, AppVersion) ->
-    AccountId = case kapps_call:account_id(Call) of
-                    Id when is_list(Id) -> Id;
-                    _ -> kapps_call:custom_channel_var(<<"Account-ID">>, Call)
-                end,
-    [{<<"Callflow-ID">>, kapps_call:current_callflow_id(Call)}
-    ,{<<"Account-ID">>, AccountId}
-    ,{<<"Call-ID">>, kapps_call:call_id(Call)}
-    ,{<<"Group-ID">>, kapps_call:monster_group_id(Call)}
-    ,{<<"Timestamp">>, get_timestamp()}
-     | kz_api:default_headers(AppName, AppVersion)
-    ].
-
--spec get_timestamp() -> integer().
-get_timestamp() ->
-    {Mega, Sec, Micro} = os:timestamp(),
-    (Mega*1000000 + Sec)*1000 + round(Micro/1000).
 
 -spec bind_q(ne_binary(), kz_proplist()) -> 'ok'.
 bind_q(Queue, Props) ->

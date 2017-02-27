@@ -31,6 +31,7 @@
 -record(state, {call :: kapps_call:call()
                ,callflow_id :: ne_binary()
                ,callflow_element :: ne_binary()
+               ,flow :: kz_json:object()
                }).
 -type state() :: #state{}.
 
@@ -74,10 +75,22 @@ start_link(Call) ->
 -spec handle_call_event(kz_json:object(), kz_proplist()) -> any().
 handle_call_event(JObj, Props) ->
     case kz_util:get_event_type(JObj) of
-        {<<"call_event">>, <<"CHANNEL_ANSWER">>} ->
-            gen_listener:cast(props:get_value('server', Props), {'answered', JObj});
+        %{<<"call_event">>, <<"CHANNEL_ANSWER">>} ->
+        %    gen_listener:cast(props:get_value('server', Props), {'answered', JObj});
         {<<"call_event">>, <<"CHANNEL_DESTROY">>} ->
             gen_listener:cast(props:get_value('server', Props), {'end_call', JObj});
+        {<<"call_event">>, <<"LEG_CREATED">>} ->
+            gen_listener:cast(props:get_value('server', Props), {'leg_created', JObj});
+        {<<"call_event">>, <<"CHANNEL_BRIDGE">>} ->
+            %% Pretty sure this is always answered
+            gen_listener:cast(props:get_value('server', Props), {'bridged', JObj});
+        {<<"call_event">>, <<"DTMF">>} ->
+            gen_listener:cast(props:get_value('server', Props), {'dtmf', JObj});
+        {<<"call_event">>, <<"RECORD_START">>} ->
+            %% Call is being recorded. Voicemail or call recording? Can figure out from state
+            'ok'.
+        {<<"call_event">>, <<"RECORD_STOP">>} ->
+            'ok'.
         {<<"call_event">>, <<"CHANNEL_TRANSFEREE">>} ->
             lager:debug("transferee"),
             gen_listener:cast(props:get_value('server', Props), {'transfer', JObj});
@@ -146,34 +159,37 @@ handle_call(_Request, _From, State) ->
 handle_cast({'init'}, #state{call=_Call}=State) ->
     {'noreply', State};
 
-handle_cast({'executing_element', _Call, _Flow, Module}, #state{}=State) ->
+handle_cast({'executing_element', Call, Flow, Module}, #state{}=State) ->
     <<"cf", Element/binary>> = kz_term:to_binary(Module),
+    NewState = State#state{callflow_element=Element, call=Call, flow=Flow},
     %% Could use new state to build proplist?
-    %% Req = kapi_callflow_event:build_generic_proplist(Call, ?APP_NAME, ?APP_VERSION),
-    {'noreply', State#state{callflow_element=Element}};
+    %% Req = build_generic_proplist(NewState),
+    {'noreply', NewState};
 
-handle_cast({'route_win', Call, _Flow}, #state{}=State) ->
+handle_cast({'route_win', Call, Flow}, #state{}=State) ->
+    NewState = State#state{call=Call, flow=Flow},
     Req = [{<<"Called-Number">>, kapps_call:request_user(Call)}
-           | kapi_callflow_event:build_generic_proplist(Call, ?APP_NAME, ?APP_VERSION)
+           | build_generic_proplist(NewState)
           ],
     kz_amqp_worker:cast(Req, fun kapi_callflow_event:publish_callflow_entered/1),
-    {'noreply', State};
+    {'noreply', NewState};
 
-handle_cast({'answered', Call, _Callflow}, #state{}=State) ->
-    Req = kapi_callflow_event:build_generic_proplist(Call, ?APP_NAME, ?APP_VERSION),
+handle_cast({'bridged', _JObj}, #state{}=State) ->
+    Req = build_generic_proplist(State),
     kz_amqp_worker:cast(Req, fun kapi_callflow_event:publish_answered/1),
     {'noreply', State};
 
 handle_cast({'branch', Call, BranchedCallflow}, #state{callflow_id=CallflowId}=State) ->
+    NewState = State#state{call=Call},
     BranchedCallflowId = kz_doc:id(BranchedCallflow),
     Req = [{<<"Branched-Callflow-ID">>, CallflowId}
-           | kapi_callflow_event:build_generic_proplist(Call, ?APP_NAME, ?APP_VERSION)
+           | build_generic_proplist(NewState)
           ],
     kz_amqp_worker:cast(Req, fun kapi_callflow_event:publish_callflow_entered/1),
-    {'noreply', State#state{callflow_id=BranchedCallflowId}};
+    {'noreply', NewState#state{callflow_id=BranchedCallflowId}};
 
-handle_cast({'end_call', JObj}, #state{call=_Call}=State) ->
-    Props = kapi_callflow_event:build_generic_proplist(kapps_call:from_json(JObj), ?MODULE, ?APP_NAME, ?APP_VERSION),
+handle_cast({'end_call', JObj}, #state{}=State) ->
+    Props = build_generic_proplist(State),
     case {kz_json:get_value(<<"Hangup-Cause">>, JObj), kz_json:get_value(<<"Disposition">>, JObj)} of
         {<<"ORIGINATOR_CANCEL">>, _} -> kapi_callflow_event:publish_cancel(Props);
         {_, <<"NO_ANSWER">>} -> kapi_callflow_event:publish_no_answer(Props);
@@ -181,8 +197,19 @@ handle_cast({'end_call', JObj}, #state{call=_Call}=State) ->
     end,
     {'stop', 'normal', State};
 
-handle_cast({'transfer', JObj}, #state{call=_Call}=State) ->
-    Props = kapi_callflow_event:build_generic_proplist(kapps_call:from_json(JObj), ?MODULE, ?APP_NAME, ?APP_VERSION),
+handle_cast({'dtmf', JObj}, #state{}=State) ->
+    _DTMF = kz_json:get_value(<<"DTMF-Digit">>, JObj),
+    %% Props = build_generic_proplist(State),
+    %% kapi_callflow_event:publish_calling_endpoint(Props),
+    {'noreply', State};
+
+handle_cast({'leg_created', _JObj}, #state{}=State) ->
+    %% Props = build_generic_proplist(State),
+    %% kapi_callflow_event:publish_calling_endpoint(Props),
+    {'noreply', State};
+
+handle_cast({'transfer', _JObj}, #state{}=State) ->
+    Props = build_generic_proplist(State),
     kapi_callflow_event:publish_transferred(Props),
     {'noreply', State};
 
@@ -237,4 +264,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-spec build_generic_proplist(state()) -> kz_proplist().
+build_generic_proplist(#state{call=Call}) ->
+    AccountId = case kapps_call:account_id(Call) of
+                    Id when is_list(Id) -> Id;
+                    _ -> kapps_call:custom_channel_var(<<"Account-ID">>, Call)
+                end,
+    [{<<"Account-ID">>, AccountId}
+    %% ,{<<"Callflow-ID">>, kapps_call:current_callflow_id(Call)}
+    ,{<<"Call-ID">>, kapps_call:call_id(Call)}
+    %% ,{<<"Group-ID">>, kapps_call:monster_group_id(Call)}
+    ,{<<"Timestamp">>, get_timestamp()}
+     | kz_api:default_headers(?APP_NAME, ?APP_VERSION)
+    ].
 
+-spec get_timestamp() -> integer().
+get_timestamp() ->
+    {Mega, Sec, Micro} = os:timestamp(),
+    (Mega*1000000 + Sec)*1000 + round(Micro/1000).
