@@ -88,9 +88,9 @@ handle_call_event(JObj, Props) ->
             gen_listener:cast(props:get_value('server', Props), {'dtmf', JObj});
         {<<"call_event">>, <<"RECORD_START">>} ->
             %% Call is being recorded. Voicemail or call recording? Can figure out from state
-            'ok'.
+            'ok';
         {<<"call_event">>, <<"RECORD_STOP">>} ->
-            'ok'.
+            'ok';
         {<<"call_event">>, <<"CHANNEL_TRANSFEREE">>} ->
             lager:debug("transferee"),
             gen_listener:cast(props:get_value('server', Props), {'transfer', JObj});

@@ -1,0 +1,18 @@
+{application, spewer,
+ [
+  {description, "Spewer - Spewing out useful events"}
+ ,{vsn, "4.0.0"}
+ ,{modules, []}
+ ,{registered, [spewer_sup]}
+ ,{applications, [ kernel
+                 , stdlib
+                 , crypto
+
+                 , kazoo_apps
+                 , kazoo_amqp
+                 , kazoo_data
+
+                 , lager
+                 ]}
+ ,{mod, {spewer_app, []}}
+ ]}.
