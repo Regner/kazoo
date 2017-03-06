@@ -42,7 +42,25 @@
 %%%===================================================================
 -spec route_req(kz_json:object(), kz_proplist()) -> 'ok'.
 route_req(JObj, _Props) ->
-    lager:debug("ROUTE REQ ~p", [kz_json:encode(JObj)]).
+    Call = kapps_call:from_route_req(JObj),
+    AccountId = kapps_call:account_id(Call),
+    Number = kapps_call:request_user(Call),
+    Inception = kapps_call:inception(Call),
+    route_req(Call, AccountId, Number, Inception).
+
+%% Number dialed
+route_req(Call, AccountId, Number, 'undefined') ->
+    DeviceId = case kapps_call:authorizing_type(Call) of
+                     <<"device">> -> kapps_call:authorizing_id(Call);
+                     _ -> 'undefined'
+               end,
+    UserId = kapps_call:owner_id(Call),
+    Event = [{<<"Account-ID">>, AccountId}
+            ,{<<"Number">>, Number}
+            ,{<<"User-ID">>, UserId}
+            ,{<<"Device-ID">>, DeviceId}],
+    kapi_spewer:publish_dialed(Event).
+
 
 %%--------------------------------------------------------------------
 %% @doc Starts the server
