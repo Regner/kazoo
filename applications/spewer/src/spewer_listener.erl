@@ -33,7 +33,7 @@
                   ,{'self', []}
                   ]).
 -define(RESPONDERS, [{{?MODULE, 'route_req'}, [{<<"dialplan">>, <<"route_req">>}]}]).
--define(QUEUE_NAME, <<"spewer_listerner">>).
+-define(QUEUE_NAME, <<"spewer_listener">>).
 -define(QUEUE_OPTIONS, [{'exclusive', 'false'}]).
 -define(CONSUME_OPTIONS, [{'exclusive', 'false'}]).
 
@@ -59,8 +59,11 @@ route_req(Call, AccountId, Number, 'undefined') ->
             ,{<<"Number">>, Number}
             ,{<<"User-ID">>, UserId}
             ,{<<"Device-ID">>, DeviceId}],
-    kapi_spewer:publish_dialed(Event).
-
+    kapi_spewer:publish_dialed(Event);
+route_req(_Call, _AccountId, _Number, _Inception) ->
+    %% Request came from outside the account
+    %% Maybe we want to spin up something here?
+    'ok'.
 
 %%--------------------------------------------------------------------
 %% @doc Starts the server

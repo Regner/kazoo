@@ -30,20 +30,45 @@
                                       ,".callflow.", (props:get_value(<<"Callflow-ID">>, Prop))/binary
                                       ,".", (kz_term:to_binary(Event))/binary>>).
 
--define(DIALED_HEADERS, [<<"Number">>, <<"Account-ID">>, <<"User-ID">>, <<"Device-ID">>]).
+-define(DIALED_HEADERS, [<<"Number">>, <<"Account-ID">>, <<"User-ID">>, <<"Device-ID">>, <<"Timestamp">>, <<"Event-ID">>]).
 -define(OPTIONAL_DIALED_HEADERS, []).
 %% Maybe make this say whether it is a user, device, callflow, etc
--define(DIALED_VALUES, [{<<"Event-Category">>, <<"spewer">>}
-                       ,{<<"Event-Name">>, <<"dialed">>}
+-define(DIALED_VALUES, [{<<"Event-Name">>, <<"dialed">>}
                        ,{<<"App-Name">>, ?APP_NAME}
                        ,{<<"App-Version">>, ?APP_VERSION}
                        ]).
 -define(DIALED_TYPES, []).
 
+extra_props(Props) ->
+   [{<<"Event-ID">>, kz_datamgr:get_uuid()}
+   %% Should this really be here?
+   %% TODO: Investigate AMQP props - hope for timestamp
+   ,{<<"Timestamp">>, kz_time:current_tstamp()} | Props].
+
+send_user_event(Props, Values, BuildFun, Name) ->
+    {'ok', Payload} = kz_api:prepare_api_payload(Props, [{<<"Event-Category">>, <<"user">>} | Values], BuildFun),
+    amqp_util:kapps_publish(?USER_EVENT(Props, Name), Payload).
+
+maybe_send_user_event(Props, Values, BuildFun, Name) ->
+    case kz_term:is_empty(props:get_value(<<"User-ID">>, Props)) of
+        'true' -> 'ok';
+        'false' -> send_user_event(Props, Values, BuildFun, Name)
+    end.
+
+send_device_event(Props, Values, BuildFun, Name) ->
+    {'ok', Payload} = kz_api:prepare_api_payload(Props, [{<<"Event-Category">>, <<"device">>} | Values], BuildFun),
+    amqp_util:kapps_publish(?USER_EVENT(Props, Name), Payload).
+
+maybe_send_device_event(Props, Values, BuildFun, Name) ->
+    case kz_term:is_empty(props:get_value(<<"Device-ID">>, Props)) of
+        'true' -> 'ok';
+        'false' -> send_device_event(Props, Values, BuildFun, Name)
+    end.
+
 -spec bind_q(ne_binary(), kz_proplist()) -> 'ok'.
 bind_q(Q, Props) ->
     AccountId = props:get_value('account_id', Props, <<"*">>),
-    Entities = props:get_value('entities', [{<<"*">>, <<"*">>}]),
+    Entities = props:get_value('entities', Props, [{<<"*">>, <<"*">>}]),
     bind_q(Q, AccountId, Entities).
 bind_q(Q, AccountId, [{Entity, EntityId} | Remaining]) ->
     amqp_util:bind_q_to_kapps(Q, ?EVENT(AccountId, Entity, EntityId, <<"*">>)),
@@ -95,8 +120,7 @@ dialed_v(JObj) -> dialed_v(kz_json:to_proplist(JObj)).
 %% @end
 %%--------------------------------------------------------------------
 -spec publish_dialed(api_terms()) -> 'ok'.
-publish_dialed(Event) ->
-    {'ok', Payload} = kz_api:prepare_api_payload(Event, ?DIALED_VALUES, fun dialed/1),
-    amqp_util:kapps_publish(?DEVICE_EVENT(Payload, <<"dialed">>), Event),
-    %% TODO: Handle no user
-    amqp_util:kapps_publish(?USER_EVENT(Payload, <<"dialed">>), Event).
+publish_dialed(Props) ->
+    NewProps = extra_props(Props),
+    maybe_send_device_event(NewProps, ?DIALED_VALUES, fun dialed/1, <<"dialed">>),
+    maybe_send_user_event(NewProps, ?DIALED_VALUES, fun dialed/1, <<"dialed">>).
