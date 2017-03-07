@@ -473,6 +473,7 @@ handle_cast('initialize', #state{call=Call}=State) ->
                ],
     CallWithHelpers = lists:foldr(fun(F, C) -> F(C) end, Call, Updaters),
     _ = kz_util:spawn(fun cf_singular_call_hooks:maybe_hook_call/1, [CallWithHelpers]),
+    send_entered_callflow(CallWithHelpers),
     {'noreply', State#state{call=CallWithHelpers
                            ,flow=Flow
                            }};
@@ -699,6 +700,13 @@ send_executing_element(Call, Data, ModuleBin) ->
           ,{<<"App-Name">>, ?APP_NAME}
           ,{<<"App-Version">>, ?APP_VERSION}],
     kapi_spewer_message:publish_executing_callflow_element(Msg).
+
+send_entered_callflow(Call) ->
+    Msg = [{<<"Call-ID">>, kapps_call:call_id_direct(Call)}
+          ,{<<"Callflow-ID">>, kapps_call:custom_channel_var(<<"CallFlow-ID">>, Call)}
+          ,{<<"App-Name">>, ?APP_NAME}
+          ,{<<"App-Version">>, ?APP_VERSION}],
+    kapi_spewer_message:publish_entered_callflow(Msg).
 
 %%--------------------------------------------------------------------
 %% @private

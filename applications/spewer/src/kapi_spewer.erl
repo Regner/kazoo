@@ -16,6 +16,7 @@
 
 -export([dialed/1, dialed_v/1, publish_dialed/1]).
 -export([executing_callflow_element/1, executing_callflow_element_v/1, publish_executing_callflow_element/1]).
+-export([entered_callflow/1, entered_callflow_v/1, publish_entered_callflow/1]).
 
 -define(EVENT(AccountId, Entity, EntityId, Event), <<"spewer.", (kz_term:to_binary(AccountId))/binary
                                                     ,".", (kz_term:to_binary(Entity))/binary, ".", (kz_term:to_binary(EntityId))/binary
@@ -121,8 +122,6 @@ timestamp() ->
 %%--------------------------------------------------------------------
 -define(DIALED_EVENT_NAME, <<"dialed">>).
 -define(DIALED_HEADERS, [<<"Number">>
-                        ,<<"User-ID">>
-                        ,<<"Device-ID">>
                         | ?DEFAULT_HEADERS]).
 -define(OPTIONAL_DIALED_HEADERS, ?USER_HEADERS ++ ?DEVICE_HEADERS).
 -define(DIALED_VALUES, [{<<"Event-Name">>, ?DIALED_EVENT_NAME}
@@ -150,10 +149,9 @@ publish_dialed(Props) ->
 %%--------------------------------------------------------------------
 %%--------------------------------------------------------------------
 -define(EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME, <<"executing_callflow_element">>).
--define(EXECUTING_CALLFLOW_ELEMENT_HEADERS, [<<"User-ID">>
-                                            ,<<"Device-ID">>
-                                            ,<<"Module">>
+-define(EXECUTING_CALLFLOW_ELEMENT_HEADERS, [<<"Module">>
                                             ,<<"Module-Data">>
+                                            ,<<"Callflow-ID">>
                                             | ?DEFAULT_HEADERS]).
 -define(OPTIONAL_EXECUTING_CALLFLOW_ELEMENT_HEADERS, ?USER_HEADERS ++ ?DEVICE_HEADERS).
 -define(EXECUTING_CALLFLOW_ELEMENT_VALUES, [{<<"Event-Name">>, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME}
@@ -177,5 +175,36 @@ executing_callflow_element_v(JObj) -> executing_callflow_element_v(kz_json:to_pr
 publish_executing_callflow_element(Props) ->
     NewProps = extra_props(Props),
     maybe_send_entity_event('user', NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME),
-    maybe_send_entity_event('device', NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME).
+    maybe_send_entity_event('device', NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME),
+    maybe_send_entity_event('callflow', NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME).
+%%--------------------------------------------------------------------
+%%--------------------------------------------------------------------
+-define(ENTERED_CALLFLOW_EVENT_NAME, <<"entered_callflow">>).
+-define(ENTERED_CALLFLOW_HEADERS, [<<"Callflow-ID">>
+                                  ,<<"Callflow-Data">>
+                                  | ?DEFAULT_HEADERS]).
+-define(OPTIONAL_ENTERED_CALLFLOW_HEADERS, ?USER_HEADERS ++ ?DEVICE_HEADERS).
+-define(ENTERED_CALLFLOW_VALUES, [{<<"Event-Name">>, ?ENTERED_CALLFLOW_EVENT_NAME}
+                                 | ?DEFAULT_VALUES]).
+-define(ENTERED_CALLFLOW_TYPES, []).
+
+-spec entered_callflow(api_terms()) -> {'ok', iolist()} | {'error', string()}.
+entered_callflow(Prop) when is_list(Prop) ->
+    case entered_callflow_v(Prop) of
+        'true' -> kz_api:build_message(Prop, ?ENTERED_CALLFLOW_HEADERS, ?OPTIONAL_ENTERED_CALLFLOW_HEADERS);
+        'false' -> {'error', "Proplist failed validation"}
+    end;
+entered_callflow(JObj) -> entered_callflow(kz_json:to_proplist(JObj)).
+
+-spec entered_callflow_v(api_terms()) -> boolean().
+entered_callflow_v(Prop) when is_list(Prop) ->
+    kz_api:validate(Prop, ?ENTERED_CALLFLOW_HEADERS, ?ENTERED_CALLFLOW_VALUES, ?ENTERED_CALLFLOW_TYPES);
+entered_callflow_v(JObj) -> entered_callflow_v(kz_json:to_proplist(JObj)).
+
+-spec publish_entered_callflow(api_terms()) -> 'ok'.
+publish_entered_callflow(Props) ->
+    NewProps = extra_props(Props),
+    maybe_send_entity_event('user', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME),
+    maybe_send_entity_event('device', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME),
+    maybe_send_entity_event('callflow', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME).
 %%--------------------------------------------------------------------

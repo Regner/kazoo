@@ -27,11 +27,11 @@
 -record(state, {call :: kapps_call:call()
                ,call_id :: ne_binary()
                ,account_id :: ne_binary()
+               ,account_db :: ne_binary()
                ,user_id :: ne_binary()
                ,device_id :: ne_binary()
                ,callflow_id :: ne_binary()
                ,callflow_module :: ne_binary()
-               ,flow :: kz_json:object()
                }).
 -type state() :: #state{}.
 
@@ -101,6 +101,7 @@ init([Call]) ->
     {'ok', #state{call=Call
                  ,call_id=kapps_call:call_id(Call)
                  ,account_id=kapps_call:account_id(Call)
+                 ,account_db=kapps_call:account_db(Call)
                  ,user_id=kapps_call:owner_id(Call)
                  ,device_id=DeviceId
                  }}.
@@ -132,6 +133,15 @@ handle_cast({'spewer', <<"executing_callflow_element">>, JObj}, #state{}=State) 
           | build_generic_proplist(State)],
     kapi_spewer:publish_executing_callflow_element(Msg),
     {'noreply', State#state{callflow_module=Element}};
+
+handle_cast({'spewer', <<"entered_callflow">>, JObj}, #state{account_db=AccountDB}=State) ->
+    CallflowId = kz_json:get_binary_value(<<"Callflow-ID">>, JObj),
+    {'ok', CallflowData} = kz_datamgr:open_cache_doc(AccountDB, CallflowId),
+    NewState = State#state{callflow_id=CallflowId},
+    Msg = [{<<"Callflow-Data">>, kz_json:public_fields(CallflowData)}
+          | build_generic_proplist(NewState)],
+    kapi_spewer:publish_entered_callflow(Msg),
+    {'noreply', NewState};
 
 %%handle_cast({'route_win', Call, Flow}, #state{}=State) ->
 %%    NewState = State#state{call=Call, flow=Flow},

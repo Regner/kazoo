@@ -33,5 +33,13 @@ handle(Data, Call) ->
             lager:info("call ~p", [Call]),
             callflow_event_listener:branch(Call, JObj),
             Flow = kz_json:get_value(<<"flow">>, JObj, kz_json:new()),
+            send_entered_callflow(Call, JObj),
             cf_exe:branch(Flow, Call)
     end.
+
+send_entered_callflow(Call, JObj) ->
+    Msg = [{<<"Call-ID">>, kapps_call:call_id_direct(Call)}
+          ,{<<"Callflow-ID">>, kz_doc:id(JObj)}
+          ,{<<"App-Name">>, ?APP_NAME}
+          ,{<<"App-Version">>, ?APP_VERSION}],
+    kapi_spewer_message:publish_entered_callflow(Msg).
