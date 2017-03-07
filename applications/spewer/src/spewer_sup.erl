@@ -10,6 +10,7 @@
 -behaviour(supervisor).
 
 %% API
+-export([new/3]).
 -export([start_link/0]).
 
 %% Supervisor callbacks
@@ -20,6 +21,10 @@
 -define(SERVER, ?MODULE).
 
 -define(CHILDREN, [?WORKER('spewer_listener')]).
+
+-spec new(any(), atom(), list()) -> sup_startchild_ret().
+new(Name, M, A) ->
+    supervisor:start_child(?SERVER, ?WORKER_NAME_ARGS_TYPE(Name, M, A, 'temporary')).
 
 %% ===================================================================
 %% API functions

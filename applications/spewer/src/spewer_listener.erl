@@ -46,8 +46,9 @@ route_req(JObj, _Props) ->
     AccountId = kapps_call:account_id(Call),
     Number = kapps_call:request_user(Call),
     Inception = kapps_call:inception(Call),
-    route_req(Call, AccountId, Number, Inception).
-
+    route_req(Call, AccountId, Number, Inception),
+    ListenerName = <<(kapps_call:call_id(Call))/binary, "-spewer_call_listener">>,
+    spewer_sup:new(ListenerName, 'spewer_call_listener', [Call]).
 %% Number dialed
 route_req(Call, AccountId, Number, 'undefined') ->
     DeviceId = case kapps_call:authorizing_type(Call) of
@@ -61,8 +62,6 @@ route_req(Call, AccountId, Number, 'undefined') ->
             ,{<<"Device-ID">>, DeviceId}],
     kapi_spewer:publish_dialed(Event);
 route_req(_Call, _AccountId, _Number, _Inception) ->
-    %% Request came from outside the account
-    %% Maybe we want to spin up something here?
     'ok'.
 
 %%--------------------------------------------------------------------

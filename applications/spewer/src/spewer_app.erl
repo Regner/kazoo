@@ -39,4 +39,6 @@ stop(_State) ->
 declare_exchanges() ->
     _ = kapi_call:declare_exchanges(),
     _ = kapi_callflow:declare_exchanges(),
+    _ = kapi_spewer:declare_exchanges(),
+    _ = kapi_spewer_message:declare_exchanges(),
     kapi_self:declare_exchanges().
