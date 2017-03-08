@@ -257,7 +257,7 @@ build_generic_proplist(#state{account_id=AccountId
                            ,{<<"Callflow-ID">>, CallflowId}
                            ,{<<"Caller-Call-ID">>, CallerCallId}
                            ,{<<"Caller-User-ID">>, CallerUserId}
-                           ,{<<"Device-ID">>, CallerDeviceId}
+                           ,{<<"Caller-Device-ID">>, CallerDeviceId}
                             | kz_api:default_headers(?APP_NAME, ?APP_VERSION)]).
 
 build_other_leg_proplist(AccountId, JObj, State) ->

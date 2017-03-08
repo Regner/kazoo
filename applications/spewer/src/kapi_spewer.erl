@@ -8,7 +8,6 @@
 -module(kapi_spewer).
 -include_lib("spewer.hrl").
 
-
 -export([bind_q/2
         ,unbind_q/2
         ]).
@@ -23,60 +22,40 @@
 -define(EVENT(AccountId, Entity, EntityId, Event), <<"spewer.", (kz_term:to_binary(AccountId))/binary
                                                     ,".", (kz_term:to_binary(Entity))/binary, ".", (kz_term:to_binary(EntityId))/binary
                                                     ,".", (kz_term:to_binary(Event))/binary>>).
--define(USER_EVENT(Prop, Event), <<"spewer.", (props:get_value(<<"Account-ID">>, Prop))/binary
-                                  ,".user.", (props:get_value(<<"User-ID">>, Prop))/binary
-                                  ,".", (kz_term:to_binary(Event))/binary>>).
--define(DEVICE_EVENT(Prop, Event), <<"spewer.", (props:get_value(<<"Account-ID">>, Prop))/binary
-                                    ,".device.", (props:get_value(<<"Device-ID">>, Prop))/binary
-                                    ,".", (kz_term:to_binary(Event))/binary>>).
--define(CALLFLOW_EVENT(Prop, Event), <<"spewer.", (props:get_value(<<"Account-ID">>, Prop))/binary
-                                      ,".callflow.", (props:get_value(<<"Callflow-ID">>, Prop))/binary
-                                      ,".", (kz_term:to_binary(Event))/binary>>).
 
--define(DEFAULT_HEADERS, [<<"Account-ID">>, <<"Timestamp">>, <<"Event-ID">>, <<"Entity">>]).
+-define(DEFAULT_HEADERS, [<<"Account-ID">>, <<"Timestamp">>, <<"Event-ID">>, <<"Entity-Type">>, <<"Entity-ID">>]).
 -define(DEFAULT_VALUES, [{<<"App-Name">>, ?APP_NAME}
                         ,{<<"App-Version">>, ?APP_VERSION}
                         ,{<<"Event-Category">>, <<"spewer">>}
                         ]).
 
--define(USER_HEADERS, [<<"Caller-User-ID">>]).
--define(USER_VALUES, [{<<"Entity">>, <<"user">>}]).
--define(USER_TYPES, []).
+-define(USER_ID_HEADERS, [<<"Caller-User-ID">>, <<"Callee-User-ID">>]).
+-define(DEVICE_ID_HEADERS, [<<"Caller-Device-ID">>, <<"Callee-Device-ID">>]).
+-define(CALLFLOW_ID_HEADERS, [<<"Callflow-ID">>]).
 
--define(DEVICE_HEADERS, [<<"Caller-Device-ID">>]).
--define(DEVICE_VALUES, [{<<"Entity">>, <<"device">>}]).
--define(DEVICE_TYPES, []).
+%%-type entity() :: binary(). %% <<"device">> | <<"user">> | <<"callflow">>.
 
--define(CALLFLOW_HEADERS, [<<"Callflow-ID">>]).
--define(CALLFLOW_VALUES, [{<<"Entity">>, <<"callflow">>}]).
--define(CALLFLOW_TYPES, []).
+entity_id_fields(<<"user">>) -> ?USER_ID_HEADERS;
+entity_id_fields(<<"device">>) -> ?DEVICE_ID_HEADERS;
+entity_id_fields(<<"callflow">>) -> ?CALLFLOW_ID_HEADERS.
 
--type entity() :: 'device' | 'user' | 'callflow'.
-
--spec entity_v(api_terms(), entity()) -> boolean().
-entity_v(Prop, 'user') when is_list(Prop) ->
-    not kz_term:is_empty(props:get_value(<<"Caller-User-ID">>, Prop));
-entity_v(Prop, 'device') when is_list(Prop) ->
-    not kz_term:is_empty(props:get_value(<<"Caller-Device-ID">>, Prop));
-entity_v(Prop, 'callflow') when is_list(Prop) ->
-    not kz_term:is_empty(props:get_value(<<"Callflow-ID">>, Prop));
-entity_v(JObj, Entity) -> entity_v(kz_json:to_proplist(JObj), Entity).
-
-maybe_send_entity_event(Entity, Props, Values, BuildFun, Name) ->
-    case entity_v(Props, Entity) of
-        'true' -> send_entity_event(Entity, Props, Values, BuildFun, Name);
-        'false' -> 'ok'
-    end.
-
-send_entity_event('user', Props, Values, BuildFun, Name) ->
-    {'ok', Payload} = kz_api:prepare_api_payload(Props, ?USER_VALUES ++ Values, BuildFun),
-    amqp_util:kapps_publish(?USER_EVENT(Props, Name), Payload);
-send_entity_event('device', Props, Values, BuildFun, Name) ->
-    {'ok', Payload} = kz_api:prepare_api_payload(Props, ?DEVICE_VALUES ++ Values, BuildFun),
-    amqp_util:kapps_publish(?DEVICE_EVENT(Props, Name), Payload);
-send_entity_event('callflow', Props, Values, BuildFun, Name) ->
-    {'ok', Payload} = kz_api:prepare_api_payload(Props, ?CALLFLOW_VALUES ++ Values, BuildFun),
-    amqp_util:kapps_publish(?CALLFLOW_EVENT(Props, Name), Payload).
+send_entity_events(Entity, Props, Values, BuildFun, Name) ->
+    send_entity_events(Entity, Props, Values, BuildFun, Name, entity_id_fields(Entity)).
+send_entity_events(_Entity, _Props, _Values, _BuildFun, _Name, []) ->
+    'ok';
+send_entity_events(Entity, Props, Values, BuildFun, Name, [Field | Rest]) ->
+    case props:get_value(Field, Props) of
+        'undefined' ->
+            'ok';
+        EntityId ->
+            AccountId = props:get_value(<<"Account-ID">>, Props),
+            NewProps = [{<<"Entity-Type">>, Entity}
+                       ,{<<"Entity-ID">>, EntityId}
+                       | Props],
+            {'ok', Payload} = kz_api:prepare_api_payload(NewProps, Values, BuildFun),
+            amqp_util:kapps_publish(?EVENT(AccountId, Entity, EntityId, Name), Payload)
+    end,
+    send_entity_events(Entity, Props, Values, BuildFun, Name, Rest).
 
 -spec bind_q(ne_binary(), kz_proplist()) -> 'ok'.
 bind_q(Q, Props) ->
@@ -125,7 +104,7 @@ timestamp() ->
 -define(DIALED_EVENT_NAME, <<"dialed">>).
 -define(DIALED_HEADERS, [<<"Number">>
                         | ?DEFAULT_HEADERS]).
--define(OPTIONAL_DIALED_HEADERS, ?USER_HEADERS ++ ?DEVICE_HEADERS).
+-define(OPTIONAL_DIALED_HEADERS, ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS).
 -define(DIALED_VALUES, [{<<"Event-Name">>, ?DIALED_EVENT_NAME}
                        | ?DEFAULT_VALUES]).
 -define(DIALED_TYPES, []).
@@ -146,8 +125,8 @@ dialed_v(JObj) -> dialed_v(kz_json:to_proplist(JObj)).
 -spec publish_dialed(api_terms()) -> 'ok'.
 publish_dialed(Props) ->
     NewProps = extra_props(Props),
-    maybe_send_entity_event('user', NewProps, ?DIALED_VALUES, fun dialed/1, ?DIALED_EVENT_NAME),
-    maybe_send_entity_event('device', NewProps, ?DIALED_VALUES, fun dialed/1, ?DIALED_EVENT_NAME).
+    send_entity_events(<<"user">>, NewProps, ?DIALED_VALUES, fun dialed/1, ?DIALED_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?DIALED_VALUES, fun dialed/1, ?DIALED_EVENT_NAME).
 %%--------------------------------------------------------------------
 %%--------------------------------------------------------------------
 -define(EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME, <<"executing_callflow_element">>).
@@ -155,7 +134,7 @@ publish_dialed(Props) ->
                                             ,<<"Module-Data">>
                                             ,<<"Callflow-ID">>
                                             | ?DEFAULT_HEADERS]).
--define(OPTIONAL_EXECUTING_CALLFLOW_ELEMENT_HEADERS, ?USER_HEADERS ++ ?DEVICE_HEADERS).
+-define(OPTIONAL_EXECUTING_CALLFLOW_ELEMENT_HEADERS, ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS).
 -define(EXECUTING_CALLFLOW_ELEMENT_VALUES, [{<<"Event-Name">>, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME}
                                            | ?DEFAULT_VALUES]).
 -define(EXECUTING_CALLFLOW_ELEMENT_TYPES, []).
@@ -176,16 +155,16 @@ executing_callflow_element_v(JObj) -> executing_callflow_element_v(kz_json:to_pr
 -spec publish_executing_callflow_element(api_terms()) -> 'ok'.
 publish_executing_callflow_element(Props) ->
     NewProps = extra_props(Props),
-    maybe_send_entity_event('user', NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME),
-    maybe_send_entity_event('device', NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME),
-    maybe_send_entity_event('callflow', NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME).
+    send_entity_events(<<"user">>, NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME),
+    send_entity_events(<<"callflow">>, NewProps, ?EXECUTING_CALLFLOW_ELEMENT_VALUES, fun executing_callflow_element/1, ?EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME).
 %%--------------------------------------------------------------------
 %%--------------------------------------------------------------------
 -define(ENTERED_CALLFLOW_EVENT_NAME, <<"entered_callflow">>).
 -define(ENTERED_CALLFLOW_HEADERS, [<<"Callflow-ID">>
                                   ,<<"Callflow-Data">>
                                   | ?DEFAULT_HEADERS]).
--define(OPTIONAL_ENTERED_CALLFLOW_HEADERS, ?USER_HEADERS ++ ?DEVICE_HEADERS).
+-define(OPTIONAL_ENTERED_CALLFLOW_HEADERS, ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS).
 -define(ENTERED_CALLFLOW_VALUES, [{<<"Event-Name">>, ?ENTERED_CALLFLOW_EVENT_NAME}
                                  | ?DEFAULT_VALUES]).
 -define(ENTERED_CALLFLOW_TYPES, []).
@@ -206,9 +185,9 @@ entered_callflow_v(JObj) -> entered_callflow_v(kz_json:to_proplist(JObj)).
 -spec publish_entered_callflow(api_terms()) -> 'ok'.
 publish_entered_callflow(Props) ->
     NewProps = extra_props(Props),
-    maybe_send_entity_event('user', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME),
-    maybe_send_entity_event('device', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME),
-    maybe_send_entity_event('callflow', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME).
+    send_entity_events(<<"user">>, NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME),
+    send_entity_events(<<"callflow">>, NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME).
 %%--------------------------------------------------------------------
 %%--------------------------------------------------------------------
 -define(CALLING_EVENT_NAME, <<"calling">>).
@@ -217,7 +196,7 @@ publish_entered_callflow(Props) ->
                          | ?DEFAULT_HEADERS]).
 -define(OPTIONAL_CALLING_HEADERS, [<<"Callee-User-ID">>
                                   ,<<"Callee-Device-ID">>
-                                  | ?USER_HEADERS ++ ?DEVICE_HEADERS]).
+                                  | ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS]).
 -define(CALLING_VALUES, [{<<"Event-Name">>, ?CALLING_EVENT_NAME}
                         | ?DEFAULT_VALUES]).
 -define(CALLING_TYPES, []).
@@ -238,9 +217,9 @@ calling_v(JObj) -> calling_v(kz_json:to_proplist(JObj)).
 -spec publish_calling(api_terms()) -> 'ok'.
 publish_calling(Props) ->
     NewProps = extra_props(Props),
-    maybe_send_entity_event('user', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME),
-    maybe_send_entity_event('device', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME),
-    maybe_send_entity_event('callflow', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME).
+    send_entity_events(<<"user">>, NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME),
+    send_entity_events(<<"callflow">>, NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME).
 %%--------------------------------------------------------------------
 %%--------------------------------------------------------------------
 -define(ANSWERED_EVENT_NAME, <<"answered">>).
@@ -249,7 +228,7 @@ publish_calling(Props) ->
                           | ?DEFAULT_HEADERS]).
 -define(OPTIONAL_ANSWERED_HEADERS, [<<"Callee-User-ID">>
                                    ,<<"Callee-Device-ID">>
-                                   | ?USER_HEADERS ++ ?DEVICE_HEADERS]).
+                                   | ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS]).
 -define(ANSWERED_VALUES, [{<<"Event-Name">>, ?ANSWERED_EVENT_NAME}
                         | ?DEFAULT_VALUES]).
 -define(ANSWERED_TYPES, []).
@@ -270,7 +249,7 @@ answered_v(JObj) -> answered_v(kz_json:to_proplist(JObj)).
 -spec publish_answered(api_terms()) -> 'ok'.
 publish_answered(Props) ->
     NewProps = extra_props(Props),
-    maybe_send_entity_event('user', NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME),
-    maybe_send_entity_event('device', NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME),
-    maybe_send_entity_event('callflow', NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME).
+    send_entity_events(<<"user">>, NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME),
+    send_entity_events(<<"callflow">>, NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME).
 %%--------------------------------------------------------------------
