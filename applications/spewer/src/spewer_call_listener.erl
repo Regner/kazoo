@@ -143,34 +143,45 @@ handle_cast({'spewer', <<"entered_callflow">>, JObj}, #state{account_db=AccountD
     kapi_spewer:publish_entered_callflow(Msg),
     {'noreply', NewState};
 
-%%handle_cast({'route_win', Call, Flow}, #state{}=State) ->
-%%    NewState = State#state{call=Call, flow=Flow},
-%%    Req = [{<<"Called-Number">>, kapps_call:request_user(Call)}
-%%           | build_generic_proplist(NewState)
-%%          ],
-%%    kz_amqp_worker:cast(Req, fun kapi_callflow_event:publish_callflow_entered/1),
-%%    {'noreply', NewState};
-%%
 %%handle_cast({'call', <<"CHANNEL_BRIDGE">>, _JObj}, #state{}=State) ->
 %%    Req = build_generic_proplist(State),
 %%    kz_amqp_worker:cast(Req, fun kapi_callflow_event:publish_answered/1),
 %%    {'noreply', State};
-%%
-%%handle_cast({'branch', Call, BranchedCallflow}, #state{callflow_id=CallflowId}=State) ->
-%%    NewState = State#state{call=Call},
-%%    BranchedCallflowId = kz_doc:id(BranchedCallflow),
-%%    Req = [{<<"Branched-Callflow-ID">>, CallflowId}
-%%           | build_generic_proplist(NewState)
-%%          ],
-%%    kz_amqp_worker:cast(Req, fun kapi_callflow_event:publish_callflow_entered/1),
-%%    {'noreply', NewState#state{callflow_id=BranchedCallflowId}};
-%%
 %%
 %%handle_cast({'call', <<"DTMF">>, JObj}, #state{}=State) ->
 %%    _DTMF = kz_json:get_value(<<"DTMF-Digit">>, JObj),
 %%    %% Props = build_generic_proplist(State),
 %%    %% kapi_callflow_event:publish_calling_endpoint(Props),
 %%    {'noreply', State};
+
+handle_cast({'call', <<"LEG_CREATED">>, JObj}, #state{account_id=AccountId}=State) ->
+    %% Needs to handle: same account. different account. offnet
+    %% Need to check this for delayed ring group
+    lager:debug("LEG CREATED ~p", [kz_json:encode(JObj)]),
+    OtherUserId = kz_call_event:owner_id(JObj),
+    OtherCallId = kz_call_event:other_leg_call_id(JObj),
+    OtherDeviceId = case kz_call_event:authorizing_type(JObj) of
+                          <<"device">> -> kz_call_event:authorizing_id(JObj);
+                          _ -> 'undefined'
+                    end,
+    %% Check that this actually is what we want
+    case kz_call_event:account_id(JObj) of
+        AccountId ->
+            Msg = [{<<"Type">>, <<"internal">>}
+                  ,{<<"Callee-User-ID">>, OtherUserId}
+                  ,{<<"Callee-Device-ID">>, OtherDeviceId}
+                  ,{<<"Callee-Call-ID">>, OtherCallId}
+                  | build_generic_proplist(State)],
+            kapi_spewer:publish_calling(Msg);
+            %% TODO: Also notify other user, device, etc
+        'undefined' ->
+             lager:debug("offnet?");
+        OtherAccount ->
+             lager:debug("other account ~p", [OtherAccount])
+    end,
+    %% Maybe modify state?
+    {'noreply', State};
+
 handle_cast({'call', <<"CHANNEL_DESTROY">>, _JObj}, #state{}=State) ->
     %%Props = build_generic_proplist(State),
     %%case {kz_json:get_value(<<"Hangup-Cause">>, JObj), kz_json:get_value(<<"Disposition">>, JObj)} of

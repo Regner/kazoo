@@ -17,6 +17,7 @@
 -export([dialed/1, dialed_v/1, publish_dialed/1]).
 -export([executing_callflow_element/1, executing_callflow_element_v/1, publish_executing_callflow_element/1]).
 -export([entered_callflow/1, entered_callflow_v/1, publish_entered_callflow/1]).
+-export([calling/1, calling_v/1, publish_calling/1]).
 
 -define(EVENT(AccountId, Entity, EntityId, Event), <<"spewer.", (kz_term:to_binary(AccountId))/binary
                                                     ,".", (kz_term:to_binary(Entity))/binary, ".", (kz_term:to_binary(EntityId))/binary
@@ -208,3 +209,37 @@ publish_entered_callflow(Props) ->
     maybe_send_entity_event('device', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME),
     maybe_send_entity_event('callflow', NewProps, ?ENTERED_CALLFLOW_VALUES, fun entered_callflow/1, ?ENTERED_CALLFLOW_EVENT_NAME).
 %%--------------------------------------------------------------------
+%%--------------------------------------------------------------------
+-define(CALLING_EVENT_NAME, <<"calling">>).
+-define(CALLING_HEADERS, [<<"Type">>
+                         | ?DEFAULT_HEADERS]).
+-define(OPTIONAL_CALLING_HEADERS, [<<"Callee-User-ID">>
+                                  ,<<"Callee-Device-ID">>
+                                  %% Maybe not optional?
+                                  ,<<"Callee-Call-ID">>
+                                  | ?USER_HEADERS ++ ?DEVICE_HEADERS]).
+-define(CALLING_VALUES, [{<<"Event-Name">>, ?CALLING_EVENT_NAME}
+                        | ?DEFAULT_VALUES]).
+-define(CALLING_TYPES, []).
+
+-spec calling(api_terms()) -> {'ok', iolist()} | {'error', string()}.
+calling(Prop) when is_list(Prop) ->
+    case calling_v(Prop) of
+        'true' -> kz_api:build_message(Prop, ?CALLING_HEADERS, ?OPTIONAL_CALLING_HEADERS);
+        'false' -> {'error', "Proplist failed validation"}
+    end;
+calling(JObj) -> calling(kz_json:to_proplist(JObj)).
+
+-spec calling_v(api_terms()) -> boolean().
+calling_v(Prop) when is_list(Prop) ->
+    kz_api:validate(Prop, ?CALLING_HEADERS, ?CALLING_VALUES, ?CALLING_TYPES);
+calling_v(JObj) -> calling_v(kz_json:to_proplist(JObj)).
+
+-spec publish_calling(api_terms()) -> 'ok'.
+publish_calling(Props) ->
+    NewProps = extra_props(Props),
+    maybe_send_entity_event('user', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME),
+    maybe_send_entity_event('device', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME),
+    maybe_send_entity_event('callflow', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME).
+%%--------------------------------------------------------------------
+
