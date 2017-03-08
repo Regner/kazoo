@@ -25,13 +25,15 @@
 -include("spewer.hrl").
 
 -record(state, {call :: kapps_call:call()
-               ,call_id :: ne_binary()
                ,account_id :: ne_binary()
                ,account_db :: ne_binary()
-               ,user_id :: ne_binary()
-               ,device_id :: ne_binary()
+               ,caller_call_id :: ne_binary()
+               ,caller_user_id :: ne_binary()
+               ,caller_device_id :: ne_binary()
                ,callflow_id :: ne_binary()
                ,callflow_module :: ne_binary()
+               %% TODO: Fix step
+               ,called_legs :: map()
                }).
 -type state() :: #state{}.
 
@@ -78,7 +80,6 @@ handle_call_event(JObj, Props) ->
 
 -spec handle_spewer_event(kz_json:object(), kz_proplist()) -> any().
 handle_spewer_event(JObj, Props) ->
-    lager:debug("SPEWER EVENT"),
     {<<"spewer_message">>, Event} = kz_util:get_event_type(JObj),
     gen_listener:cast(props:get_value('server', Props), {'spewer', Event, JObj}).
 
@@ -99,11 +100,12 @@ init([Call]) ->
                      _ -> 'undefined'
                end,
     {'ok', #state{call=Call
-                 ,call_id=kapps_call:call_id(Call)
                  ,account_id=kapps_call:account_id(Call)
                  ,account_db=kapps_call:account_db(Call)
-                 ,user_id=kapps_call:owner_id(Call)
-                 ,device_id=DeviceId
+                 ,caller_call_id=kapps_call:call_id(Call)
+                 ,caller_user_id=kapps_call:owner_id(Call)
+                 ,caller_device_id=DeviceId
+                 ,called_legs=#{}
                  }}.
 
 %%--------------------------------------------------------------------
@@ -143,47 +145,49 @@ handle_cast({'spewer', <<"entered_callflow">>, JObj}, #state{account_db=AccountD
     kapi_spewer:publish_entered_callflow(Msg),
     {'noreply', NewState};
 
-%%handle_cast({'call', <<"CHANNEL_BRIDGE">>, _JObj}, #state{}=State) ->
-%%    Req = build_generic_proplist(State),
-%%    kz_amqp_worker:cast(Req, fun kapi_callflow_event:publish_answered/1),
-%%    {'noreply', State};
-%%
 %%handle_cast({'call', <<"DTMF">>, JObj}, #state{}=State) ->
 %%    _DTMF = kz_json:get_value(<<"DTMF-Digit">>, JObj),
 %%    %% Props = build_generic_proplist(State),
 %%    %% kapi_callflow_event:publish_calling_endpoint(Props),
 %%    {'noreply', State};
 
-handle_cast({'call', <<"LEG_CREATED">>, JObj}, #state{account_id=AccountId}=State) ->
+handle_cast({'call', <<"LEG_CREATED">>, JObj}, #state{account_id=AccountId, called_legs=Legs}=State) ->
     %% Needs to handle: same account. different account. offnet
     %% Need to check this for delayed ring group
     lager:debug("LEG CREATED ~p", [kz_json:encode(JObj)]),
-    OtherUserId = kz_call_event:owner_id(JObj),
     OtherCallId = kz_call_event:other_leg_call_id(JObj),
-    OtherDeviceId = case kz_call_event:authorizing_type(JObj) of
-                          <<"device">> -> kz_call_event:authorizing_id(JObj);
-                          _ -> 'undefined'
-                    end,
-    %% Check that this actually is what we want
-    case kz_call_event:account_id(JObj) of
-        AccountId ->
-            Msg = [{<<"Type">>, <<"internal">>}
-                  ,{<<"Callee-User-ID">>, OtherUserId}
-                  ,{<<"Callee-Device-ID">>, OtherDeviceId}
-                  ,{<<"Callee-Call-ID">>, OtherCallId}
-                  | build_generic_proplist(State)],
-            kapi_spewer:publish_calling(Msg);
-            %% TODO: Also notify other user, device, etc
-        'undefined' ->
-             lager:debug("offnet?");
-        OtherAccount ->
-             lager:debug("other account ~p", [OtherAccount])
+    case build_other_leg_proplist(AccountId, JObj, State) of
+        'undefined' -> 'ok';
+        Msg -> kapi_spewer:publish_calling(Msg)
     end,
-    %% Maybe modify state?
+    {'noreply', State#state{called_legs=Legs#{OtherCallId => JObj}}};
+
+handle_cast({'call', <<"CHANNEL_BRIDGE">>, JObj}, #state{account_id=AccountId, called_legs=Legs}=State) ->
+    %% Find the leg created event
+    OtherCallId = kz_call_event:other_leg_call_id(JObj),
+    case maps:find(OtherCallId, Legs) of
+        {'ok', LegCreatedJObj} ->
+            case build_other_leg_proplist(AccountId, LegCreatedJObj, State) of
+                'undefined' -> 'ok';
+                Msg -> kapi_spewer:publish_answered(Msg)
+            end;
+        _ ->
+            lager:error("Bridge to a leg we haven't seen ~p", [JObj])
+    end,
     {'noreply', State};
 
-handle_cast({'call', <<"CHANNEL_DESTROY">>, _JObj}, #state{}=State) ->
-    %%Props = build_generic_proplist(State),
+handle_cast({'call', <<"CHANNEL_DESTROY">>, JObj}, #state{account_id=AccountId, called_legs=Legs}=State) ->
+    OtherCallId = kz_call_event:other_leg_call_id(JObj),
+    case maps:find(OtherCallId, Legs) of
+        {'ok', LegCreatedJObj} ->
+            case build_other_leg_proplist(AccountId, LegCreatedJObj, State) of
+                'undefined' -> 'ok';
+                %% Should be hangup - just a test
+                Msg -> kapi_spewer:publish_answered(Msg)
+            end;
+        _ ->
+            lager:error("Bridge to a leg we haven't seen ~p", [JObj])
+    end,
     %%case {kz_json:get_value(<<"Hangup-Cause">>, JObj), kz_json:get_value(<<"Disposition">>, JObj)} of
     %%    {<<"ORIGINATOR_CANCEL">>, _} -> kapi_callflow_event:publish_cancel(Props);
     %%    {_, <<"NO_ANSWER">>} -> kapi_callflow_event:publish_no_answer(Props);
@@ -244,15 +248,37 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 -spec build_generic_proplist(state()) -> kz_proplist().
 build_generic_proplist(#state{account_id=AccountId
-                             ,call_id=CallId
-                             ,user_id=UserId
-                             ,device_id=DeviceId
+                             ,caller_call_id=CallerCallId
+                             ,caller_user_id=CallerUserId
+                             ,caller_device_id=CallerDeviceId
                              ,callflow_id=CallflowId}) ->
     %% Maybe remove undefined?
-    [{<<"Account-ID">>, AccountId}
-    ,{<<"Callflow-ID">>, CallflowId}
-    ,{<<"Call-ID">>, CallId}
-    ,{<<"User-ID">>, UserId}
-    ,{<<"Device-ID">>, DeviceId}
-     | kz_api:default_headers(?APP_NAME, ?APP_VERSION)
-    ].
+    props:filter_undefined([{<<"Account-ID">>, AccountId}
+                           ,{<<"Callflow-ID">>, CallflowId}
+                           ,{<<"Caller-Call-ID">>, CallerCallId}
+                           ,{<<"Caller-User-ID">>, CallerUserId}
+                           ,{<<"Device-ID">>, CallerDeviceId}
+                            | kz_api:default_headers(?APP_NAME, ?APP_VERSION)]).
+
+build_other_leg_proplist(AccountId, JObj, State) ->
+    OtherUserId = kz_call_event:owner_id(JObj),
+    OtherCallId = kz_call_event:other_leg_call_id(JObj),
+    OtherDeviceId = case kz_call_event:authorizing_type(JObj) of
+                          <<"device">> -> kz_call_event:authorizing_id(JObj);
+                          _ -> 'undefined'
+                    end,
+    %% Check that this actually is what we want
+    case kz_call_event:account_id(JObj) of
+        AccountId ->
+            [{<<"Type">>, <<"internal">>}
+            ,{<<"Callee-User-ID">>, OtherUserId}
+            ,{<<"Callee-Device-ID">>, OtherDeviceId}
+            ,{<<"Callee-Call-ID">>, OtherCallId}
+            | build_generic_proplist(State)];
+        'undefined' ->
+             lager:debug("offnet?"),
+             'undefined';
+        OtherAccount ->
+             lager:debug("other account ~p", [OtherAccount]),
+             'undefined'
+    end.

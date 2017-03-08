@@ -18,6 +18,7 @@
 -export([executing_callflow_element/1, executing_callflow_element_v/1, publish_executing_callflow_element/1]).
 -export([entered_callflow/1, entered_callflow_v/1, publish_entered_callflow/1]).
 -export([calling/1, calling_v/1, publish_calling/1]).
+-export([answered/1, answered_v/1, publish_answered/1]).
 
 -define(EVENT(AccountId, Entity, EntityId, Event), <<"spewer.", (kz_term:to_binary(AccountId))/binary
                                                     ,".", (kz_term:to_binary(Entity))/binary, ".", (kz_term:to_binary(EntityId))/binary
@@ -38,11 +39,11 @@
                         ,{<<"Event-Category">>, <<"spewer">>}
                         ]).
 
--define(USER_HEADERS, [<<"User-ID">>]).
+-define(USER_HEADERS, [<<"Caller-User-ID">>]).
 -define(USER_VALUES, [{<<"Entity">>, <<"user">>}]).
 -define(USER_TYPES, []).
 
--define(DEVICE_HEADERS, [<<"Device-ID">>]).
+-define(DEVICE_HEADERS, [<<"Caller-Device-ID">>]).
 -define(DEVICE_VALUES, [{<<"Entity">>, <<"device">>}]).
 -define(DEVICE_TYPES, []).
 
@@ -54,17 +55,17 @@
 
 -spec entity_v(api_terms(), entity()) -> boolean().
 entity_v(Prop, 'user') when is_list(Prop) ->
-    kz_api:validate(Prop, ?USER_HEADERS, ?USER_VALUES, ?USER_TYPES);
+    not kz_term:is_empty(props:get_value(<<"Caller-User-ID">>, Prop));
 entity_v(Prop, 'device') when is_list(Prop) ->
-    kz_api:validate(Prop, ?DEVICE_HEADERS, ?DEVICE_VALUES, ?DEVICE_TYPES);
+    not kz_term:is_empty(props:get_value(<<"Caller-Device-ID">>, Prop));
 entity_v(Prop, 'callflow') when is_list(Prop) ->
-    kz_api:validate(Prop, ?CALLFLOW_HEADERS, ?CALLFLOW_VALUES, ?CALLFLOW_TYPES);
+    not kz_term:is_empty(props:get_value(<<"Callflow-ID">>, Prop));
 entity_v(JObj, Entity) -> entity_v(kz_json:to_proplist(JObj), Entity).
 
 maybe_send_entity_event(Entity, Props, Values, BuildFun, Name) ->
     case entity_v(Props, Entity) of
-        'true' -> 'ok';
-        'false' -> send_entity_event(Entity, Props, Values, BuildFun, Name)
+        'true' -> send_entity_event(Entity, Props, Values, BuildFun, Name);
+        'false' -> 'ok'
     end.
 
 send_entity_event('user', Props, Values, BuildFun, Name) ->
@@ -212,11 +213,10 @@ publish_entered_callflow(Props) ->
 %%--------------------------------------------------------------------
 -define(CALLING_EVENT_NAME, <<"calling">>).
 -define(CALLING_HEADERS, [<<"Type">>
+                         ,<<"Callee-Call-ID">>
                          | ?DEFAULT_HEADERS]).
 -define(OPTIONAL_CALLING_HEADERS, [<<"Callee-User-ID">>
                                   ,<<"Callee-Device-ID">>
-                                  %% Maybe not optional?
-                                  ,<<"Callee-Call-ID">>
                                   | ?USER_HEADERS ++ ?DEVICE_HEADERS]).
 -define(CALLING_VALUES, [{<<"Event-Name">>, ?CALLING_EVENT_NAME}
                         | ?DEFAULT_VALUES]).
@@ -242,4 +242,35 @@ publish_calling(Props) ->
     maybe_send_entity_event('device', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME),
     maybe_send_entity_event('callflow', NewProps, ?CALLING_VALUES, fun calling/1, ?CALLING_EVENT_NAME).
 %%--------------------------------------------------------------------
+%%--------------------------------------------------------------------
+-define(ANSWERED_EVENT_NAME, <<"answered">>).
+-define(ANSWERED_HEADERS, [<<"Type">>
+                          ,<<"Callee-Call-ID">>
+                          | ?DEFAULT_HEADERS]).
+-define(OPTIONAL_ANSWERED_HEADERS, [<<"Callee-User-ID">>
+                                   ,<<"Callee-Device-ID">>
+                                   | ?USER_HEADERS ++ ?DEVICE_HEADERS]).
+-define(ANSWERED_VALUES, [{<<"Event-Name">>, ?ANSWERED_EVENT_NAME}
+                        | ?DEFAULT_VALUES]).
+-define(ANSWERED_TYPES, []).
 
+-spec answered(api_terms()) -> {'ok', iolist()} | {'error', string()}.
+answered(Prop) when is_list(Prop) ->
+    case answered_v(Prop) of
+        'true' -> kz_api:build_message(Prop, ?ANSWERED_HEADERS, ?OPTIONAL_ANSWERED_HEADERS);
+        'false' -> {'error', "Proplist failed validation"}
+    end;
+answered(JObj) -> answered(kz_json:to_proplist(JObj)).
+
+-spec answered_v(api_terms()) -> boolean().
+answered_v(Prop) when is_list(Prop) ->
+    kz_api:validate(Prop, ?ANSWERED_HEADERS, ?ANSWERED_VALUES, ?ANSWERED_TYPES);
+answered_v(JObj) -> answered_v(kz_json:to_proplist(JObj)).
+
+-spec publish_answered(api_terms()) -> 'ok'.
+publish_answered(Props) ->
+    NewProps = extra_props(Props),
+    maybe_send_entity_event('user', NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME),
+    maybe_send_entity_event('device', NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME),
+    maybe_send_entity_event('callflow', NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME).
+%%--------------------------------------------------------------------
