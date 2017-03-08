@@ -130,8 +130,8 @@ publish_dialed(Props) ->
 %%--------------------------------------------------------------------
 %%--------------------------------------------------------------------
 -define(EXECUTING_CALLFLOW_ELEMENT_EVENT_NAME, <<"executing_callflow_element">>).
--define(EXECUTING_CALLFLOW_ELEMENT_HEADERS, [<<"Module">>
-                                            ,<<"Module-Data">>
+-define(EXECUTING_CALLFLOW_ELEMENT_HEADERS, [<<"Callflow-Module">>
+                                            ,<<"Callflow-Module-Data">>
                                             ,<<"Callflow-ID">>
                                             | ?DEFAULT_HEADERS]).
 -define(OPTIONAL_EXECUTING_CALLFLOW_ELEMENT_HEADERS, ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS).

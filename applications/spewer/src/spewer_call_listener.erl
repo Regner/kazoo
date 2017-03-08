@@ -130,8 +130,8 @@ handle_call(_Request, _From, State) ->
 
 handle_cast({'spewer', <<"executing_callflow_element">>, JObj}, #state{}=State) ->
     <<"cf_", Element/binary>> = kz_json:get_binary_value(<<"Module">>, JObj),
-    Msg = [{<<"Module">>, Element}
-          ,{<<"Module-Data">>, kz_json:get_value(<<"Module-Data">>, JObj)}
+    Msg = [{<<"Callflow-Module">>, Element}
+          ,{<<"Callflow-Module-Data">>, kz_json:get_value(<<"Module-Data">>, JObj)}
           | build_generic_proplist(State)],
     kapi_spewer:publish_executing_callflow_element(Msg),
     {'noreply', State#state{callflow_module=Element}};
