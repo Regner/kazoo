@@ -146,6 +146,16 @@ handle_cast({'spewer', <<"entered_callflow">>, JObj}, #state{account_db=AccountD
     kapi_spewer:publish_entered_callflow(Msg),
     {'noreply', NewState};
 
+handle_cast({'spewer', <<"left_voicemail">>, JObj}, #state{}=State) ->
+    %% If they hungup to leave message then we'll miss this. Fuck.
+    %% Should convert to seconds
+    Msg = [{<<"Message-Length">>, kz_json:get_value(<<"Message-Length">>, JObj)}
+          ,{<<"Mailbox-ID">>, kz_json:get_value(<<"Mailbox-ID">>, JObj)}
+          ,{<<"Mailbox-Owner-ID">>, kz_json:get_value(<<"Mailbox-Owner-ID">>, JObj)}
+          | build_generic_proplist(State)],
+    kapi_spewer:publish_left_voicemail(Msg),
+    {'noreply', State};
+
 %%handle_cast({'call', <<"DTMF">>, JObj}, #state{}=State) ->
 %%    _DTMF = kz_json:get_value(<<"DTMF-Digit">>, JObj),
 %%    {'noreply', State};
@@ -160,7 +170,8 @@ handle_cast({'call', <<"LEG_CREATED">>, JObj}, #state{account_id=AccountId, call
     end,
     {'noreply', State#state{called_legs=Legs#{OtherCallId => JObj}}};
 
-handle_cast({'call', <<"CHANNEL_ANSWER">>, _JObj}, #state{}=State) ->
+handle_cast({'call', <<"CHANNEL_ANSWER">>, JObj}, #state{}=State) ->
+    lager:error("answered ~p", [JObj]),
     {'noreply', State#state{answered='true'}};
 
 handle_cast({'call', <<"CHANNEL_BRIDGE">>, JObj}, #state{account_id=AccountId, called_legs=Legs}=State) ->
@@ -169,6 +180,8 @@ handle_cast({'call', <<"CHANNEL_BRIDGE">>, JObj}, #state{account_id=AccountId, c
     OtherCallId = kz_call_event:other_leg_call_id(JObj),
     case maps:find(OtherCallId, Legs) of
         {'ok', LegCreatedJObj} ->
+            lager:error("bridged to leg ~p", [LegCreatedJObj]),
+            %% This doesn't work on outbound. Answered is immediate
             case build_other_leg_proplist(AccountId, LegCreatedJObj, State) of
                 'undefined' -> 'ok';
                 Msg -> kapi_spewer:publish_answered(Msg)
@@ -177,12 +190,6 @@ handle_cast({'call', <<"CHANNEL_BRIDGE">>, JObj}, #state{account_id=AccountId, c
             lager:error("Bridge to a leg we haven't seen ~p", [JObj])
     end,
     {'noreply', State};
-
-%handle_cast({'call', <<"CHANNEL_UNBRIDGE">>, JObj}, #state{answered='true'}=State) ->
-%    lager:error("channel unbridged ~p", [JObj]),
-%    %% Not always!
-%    kapi_spewer:publish_hangup([{<<"Reason">>, <<"callee_hangup">>} | build_generic_proplist(State)]),
-%    {'stop', 'normal', State};
 
 handle_cast({'call', <<"CHANNEL_UNBRIDGE">>, JObj}, #state{answered='true'}=State) ->
     lager:error("channel unbridged ~p", [kz_json:encode(JObj)]),
@@ -205,6 +212,8 @@ handle_cast({'call', <<"LEG_DESTROYED">>, JObj}, #state{answered='true'}=State) 
 
 %% If we're still running when we get to a CHANNEL_DESTROY it means the caller hung up
 handle_cast({'call', <<"CHANNEL_DESTROY">>, JObj}, #state{answered='false'}=State) ->
+    %% This doesn't work for outbound
+    %% We also get this when user is busy if we have retries (like on a ring group)
     kapi_spewer:publish_hangup([{<<"Reason">>, <<"caller_cancel">>} | build_generic_proplist(State)]),
     lager:error("Channel destroy ~p", [JObj]),
     {'stop', 'normal', State};

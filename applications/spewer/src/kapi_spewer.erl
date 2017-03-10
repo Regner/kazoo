@@ -20,6 +20,7 @@
 -export([answered/1, answered_v/1, publish_answered/1]).
 -export([hangup/1, hangup_v/1, publish_hangup/1]).
 -export([callee_busy/1, callee_busy_v/1, publish_callee_busy/1]).
+-export([left_voicemail/1, left_voicemail_v/1, publish_left_voicemail/1]).
 
 -define(EVENT(AccountId, Entity, EntityId, Event), <<"spewer.", (kz_term:to_binary(AccountId))/binary
                                                     ,".", (kz_term:to_binary(Entity))/binary, ".", (kz_term:to_binary(EntityId))/binary
@@ -28,7 +29,7 @@
 -define(DEFAULT_HEADERS, [<<"Account-ID">>, <<"Timestamp">>, <<"Event-ID">>, <<"Entity-Type">>, <<"Entity-ID">>, <<"Caller-Call-ID">>]).
 -define(DEFAULT_VALUES, [{<<"Event-Category">>, <<"spewer">>}]).
 
--define(USER_ID_HEADERS, [<<"Caller-User-ID">>, <<"Callee-User-ID">>]).
+-define(USER_ID_HEADERS, [<<"Caller-User-ID">>, <<"Callee-User-ID">>, <<"Mailbox-Owner-ID">>]).
 -define(DEVICE_ID_HEADERS, [<<"Caller-Device-ID">>, <<"Callee-Device-ID">>]).
 -define(CALLFLOW_ID_HEADERS, [<<"Callflow-ID">>]).
 
@@ -48,9 +49,11 @@ send_entity_events(Entity, Props, Values, BuildFun, Name, [Field | Rest]) ->
             'ok';
         EntityId ->
             AccountId = props:get_value(<<"Account-ID">>, Props),
+            %% So we can see what entity the message is for, if bind to *
             NewProps = [{<<"Entity-Type">>, Entity}
                        ,{<<"Entity-ID">>, EntityId}
                        | Props],
+            lager:error("PROPS ~p", [NewProps]),
             {'ok', Payload} = kz_api:prepare_api_payload(NewProps, Values, BuildFun),
             amqp_util:kapps_publish(?EVENT(AccountId, Entity, EntityId, Name), Payload)
     end,
@@ -89,6 +92,8 @@ declare_exchanges() ->
     amqp_util:kapps_exchange().
 
 extra_props(Props) ->
+   %% Because if you subscribe to * you could get duplicate events.
+   %% This makes it obvious if an event is duplicated
    [{<<"Event-ID">>, kz_datamgr:get_uuid()}
    %% Should this really be here?
    %% TODO: Investigate AMQP props - hope for timestamp
@@ -315,4 +320,34 @@ publish_callee_busy(Props) ->
     send_entity_events(<<"device">>, NewProps, ?CALLEE_BUSY_VALUES, fun callee_busy/1, ?CALLEE_BUSY_EVENT_NAME),
     send_entity_events(<<"callflow">>, NewProps, ?CALLEE_BUSY_VALUES, fun callee_busy/1, ?CALLEE_BUSY_EVENT_NAME).
 %%--------------------------------------------------------------------
+%%--------------------------------------------------------------------
+-define(LEFT_VOICEMAIL_EVENT_NAME, <<"left_voicemail">>).
+-define(LEFT_VOICEMAIL_HEADERS, [<<"Message-Length">>
+                                ,<<"Mailbox-ID">>
+                                ,<<"Mailbox-Owner-ID">>
+                                | ?DEFAULT_HEADERS]).
+-define(OPTIONAL_LEFT_VOICEMAIL_HEADERS, [?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS]).
+-define(LEFT_VOICEMAIL_VALUES, [{<<"Event-Name">>, ?LEFT_VOICEMAIL_EVENT_NAME}
+                               | ?DEFAULT_VALUES]).
+-define(LEFT_VOICEMAIL_TYPES, []).
 
+-spec left_voicemail(api_terms()) -> {'ok', iolist()} | {'error', string()}.
+left_voicemail(Prop) when is_list(Prop) ->
+    case left_voicemail_v(Prop) of
+        'true' -> kz_api:build_message(Prop, ?LEFT_VOICEMAIL_HEADERS, ?OPTIONAL_LEFT_VOICEMAIL_HEADERS);
+        'false' -> {'error', "Proplist failed validation"}
+    end;
+left_voicemail(JObj) -> left_voicemail(kz_json:to_proplist(JObj)).
+
+-spec left_voicemail_v(api_terms()) -> boolean().
+left_voicemail_v(Prop) when is_list(Prop) ->
+    kz_api:validate(Prop, ?LEFT_VOICEMAIL_HEADERS, ?LEFT_VOICEMAIL_VALUES, ?LEFT_VOICEMAIL_TYPES);
+left_voicemail_v(JObj) -> left_voicemail_v(kz_json:to_proplist(JObj)).
+
+-spec publish_left_voicemail(api_terms()) -> 'ok'.
+publish_left_voicemail(Props) ->
+    NewProps = extra_props(Props),
+    send_entity_events(<<"user">>, NewProps, ?LEFT_VOICEMAIL_VALUES, fun left_voicemail/1, ?LEFT_VOICEMAIL_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?LEFT_VOICEMAIL_VALUES, fun left_voicemail/1, ?LEFT_VOICEMAIL_EVENT_NAME),
+    send_entity_events(<<"callflow">>, NewProps, ?LEFT_VOICEMAIL_VALUES, fun left_voicemail/1, ?LEFT_VOICEMAIL_EVENT_NAME).
+%%--------------------------------------------------------------------

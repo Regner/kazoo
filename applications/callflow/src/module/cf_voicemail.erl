@@ -561,11 +561,13 @@ record_voicemail(AttachmentName, #mailbox{max_message_length=MaxMessageLength
                 {'ok', 'record'} ->
                     record_voicemail(tmp_file(Ext), Box, Call);
                 {'ok', _Selection} ->
+                    send_left_voicemail_to_spewer(Call, Length, Box),
                     cf_util:start_task(fun new_message/4, [AttachmentName, Length, Box], Call),
                     _ = kapps_call_command:prompt(<<"vm-saved">>, Call),
                     _ = kapps_call_command:prompt(<<"vm-thank_you">>, Call),
                     'ok';
                 {'branch', Flow} ->
+                    send_left_voicemail_to_spewer(Call, Length, Box),
                     _ = new_message(AttachmentName, Length, Box, Call),
                     _ = kapps_call_command:prompt(<<"vm-saved">>, Call),
                     {'branch', Flow}
@@ -2037,3 +2039,12 @@ send_mwi_update(New, Saved, BoxNumber, Call) ->
               ],
     lager:debug("updating MWI for vmbox ~s@~s (~b/~b)", [BoxNumber, Realm, New, Saved]),
     kz_amqp_worker:cast(Command, fun kapi_presence:publish_mwi_update/1).
+
+send_left_voicemail_to_spewer(Call, Length, #mailbox{mailbox_id=MailboxId, owner_id=OwnerId}) ->
+    Msg = [{<<"Call-ID">>, kapps_call:call_id_direct(Call)}
+          ,{<<"Message-Length">>, Length}
+          ,{<<"Mailbox-ID">>, MailboxId}
+          ,{<<"Mailbox-Owner-ID">>, OwnerId}
+          ,{<<"App-Name">>, ?APP_NAME}
+          ,{<<"App-Version">>, ?APP_VERSION}],
+    kapi_spewer_message:publish_left_voicemail(Msg).
