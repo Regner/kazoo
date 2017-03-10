@@ -32,7 +32,7 @@
                ,caller_device_id :: ne_binary()
                ,callflow_id :: ne_binary()
                ,callflow_module :: ne_binary()
-               %% TODO: Fix step
+               ,answered :: boolean()
                ,called_legs :: map()
                }).
 -type state() :: #state{}.
@@ -105,6 +105,7 @@ init([Call]) ->
                  ,caller_call_id=kapps_call:call_id(Call)
                  ,caller_user_id=kapps_call:owner_id(Call)
                  ,caller_device_id=DeviceId
+                 ,answered='false'
                  ,called_legs=#{}
                  }}.
 
@@ -147,14 +148,11 @@ handle_cast({'spewer', <<"entered_callflow">>, JObj}, #state{account_db=AccountD
 
 %%handle_cast({'call', <<"DTMF">>, JObj}, #state{}=State) ->
 %%    _DTMF = kz_json:get_value(<<"DTMF-Digit">>, JObj),
-%%    %% Props = build_generic_proplist(State),
-%%    %% kapi_callflow_event:publish_calling_endpoint(Props),
 %%    {'noreply', State};
 
 handle_cast({'call', <<"LEG_CREATED">>, JObj}, #state{account_id=AccountId, called_legs=Legs}=State) ->
     %% Needs to handle: same account. different account. offnet
     %% Need to check this for delayed ring group
-    lager:debug("LEG CREATED ~p", [kz_json:encode(JObj)]),
     OtherCallId = kz_call_event:other_leg_call_id(JObj),
     case build_other_leg_proplist(AccountId, JObj, State) of
         'undefined' -> 'ok';
@@ -162,7 +160,11 @@ handle_cast({'call', <<"LEG_CREATED">>, JObj}, #state{account_id=AccountId, call
     end,
     {'noreply', State#state{called_legs=Legs#{OtherCallId => JObj}}};
 
+handle_cast({'call', <<"CHANNEL_ANSWER">>, _JObj}, #state{}=State) ->
+    {'noreply', State#state{answered='true'}};
+
 handle_cast({'call', <<"CHANNEL_BRIDGE">>, JObj}, #state{account_id=AccountId, called_legs=Legs}=State) ->
+    lager:error("channel bridged ~p", [kz_json:encode(JObj)]),
     %% Find the leg created event
     OtherCallId = kz_call_event:other_leg_call_id(JObj),
     case maps:find(OtherCallId, Legs) of
@@ -176,23 +178,39 @@ handle_cast({'call', <<"CHANNEL_BRIDGE">>, JObj}, #state{account_id=AccountId, c
     end,
     {'noreply', State};
 
-handle_cast({'call', <<"CHANNEL_DESTROY">>, JObj}, #state{account_id=AccountId, called_legs=Legs}=State) ->
-    OtherCallId = kz_call_event:other_leg_call_id(JObj),
-    case maps:find(OtherCallId, Legs) of
-        {'ok', LegCreatedJObj} ->
-            case build_other_leg_proplist(AccountId, LegCreatedJObj, State) of
-                'undefined' -> 'ok';
-                %% Should be hangup - just a test
-                Msg -> kapi_spewer:publish_answered(Msg)
-            end;
-        _ ->
-            lager:error("Bridge to a leg we haven't seen ~p", [JObj])
+%handle_cast({'call', <<"CHANNEL_UNBRIDGE">>, JObj}, #state{answered='true'}=State) ->
+%    lager:error("channel unbridged ~p", [JObj]),
+%    %% Not always!
+%    kapi_spewer:publish_hangup([{<<"Reason">>, <<"callee_hangup">>} | build_generic_proplist(State)]),
+%    {'stop', 'normal', State};
+
+handle_cast({'call', <<"CHANNEL_UNBRIDGE">>, JObj}, #state{answered='true'}=State) ->
+    lager:error("channel unbridged ~p", [kz_json:encode(JObj)]),
+    {'noreply', State};
+
+%% Probably need callee information in hangup events, especially if they hung up
+%% If we get a LEG_DESTROYED before CHANNEL_DESTROY it means the callee hung up
+handle_cast({'call', <<"LEG_DESTROYED">>, JObj}, #state{answered='false'}=State) ->
+    lager:error("Leg destroyed ~p", [JObj]),
+    case kz_call_event:hangup_cause(JObj) of
+        %% Should check whether timed out, might warrant separate event
+        <<"USER_BUSY">> -> kapi_spewer:publish_callee_busy(build_generic_proplist(State));
+        _ -> 'ok'
     end,
-    %%case {kz_json:get_value(<<"Hangup-Cause">>, JObj), kz_json:get_value(<<"Disposition">>, JObj)} of
-    %%    {<<"ORIGINATOR_CANCEL">>, _} -> kapi_callflow_event:publish_cancel(Props);
-    %%    {_, <<"NO_ANSWER">>} -> kapi_callflow_event:publish_no_answer(Props);
-    %%    _ -> kapi_callflow_event:publish_hangup(Props)
-    %%end,
+    {'noreply', State};
+handle_cast({'call', <<"LEG_DESTROYED">>, JObj}, #state{answered='true'}=State) ->
+    kapi_spewer:publish_hangup([{<<"Reason">>, <<"callee_hangup">>} | build_generic_proplist(State)]),
+    lager:error("Leg destroyed ~p", [JObj]),
+    {'stop', 'normal', State};
+
+%% If we're still running when we get to a CHANNEL_DESTROY it means the caller hung up
+handle_cast({'call', <<"CHANNEL_DESTROY">>, JObj}, #state{answered='false'}=State) ->
+    kapi_spewer:publish_hangup([{<<"Reason">>, <<"caller_cancel">>} | build_generic_proplist(State)]),
+    lager:error("Channel destroy ~p", [JObj]),
+    {'stop', 'normal', State};
+handle_cast({'call', <<"CHANNEL_DESTROY">>, JObj}, #state{answered='true'}=State) ->
+    lager:error("Channel destroy ~p", [kz_json:encode(JObj)]),
+    kapi_spewer:publish_hangup([{<<"Reason">>, <<"caller_hangup">>} | build_generic_proplist(State)]),
     {'stop', 'normal', State};
 
 handle_cast(_Msg, State) ->
@@ -252,7 +270,6 @@ build_generic_proplist(#state{account_id=AccountId
                              ,caller_user_id=CallerUserId
                              ,caller_device_id=CallerDeviceId
                              ,callflow_id=CallflowId}) ->
-    %% Maybe remove undefined?
     props:filter_undefined([{<<"Account-ID">>, AccountId}
                            ,{<<"Callflow-ID">>, CallflowId}
                            ,{<<"Caller-Call-ID">>, CallerCallId}
@@ -270,6 +287,7 @@ build_other_leg_proplist(AccountId, JObj, State) ->
     %% Check that this actually is what we want
     case kz_call_event:account_id(JObj) of
         AccountId ->
+            %% Says internal when call is inbound... Need to fix.
             [{<<"Type">>, <<"internal">>}
             ,{<<"Callee-User-ID">>, OtherUserId}
             ,{<<"Callee-Device-ID">>, OtherDeviceId}

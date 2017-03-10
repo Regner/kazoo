@@ -18,16 +18,15 @@
 -export([entered_callflow/1, entered_callflow_v/1, publish_entered_callflow/1]).
 -export([calling/1, calling_v/1, publish_calling/1]).
 -export([answered/1, answered_v/1, publish_answered/1]).
+-export([hangup/1, hangup_v/1, publish_hangup/1]).
+-export([callee_busy/1, callee_busy_v/1, publish_callee_busy/1]).
 
 -define(EVENT(AccountId, Entity, EntityId, Event), <<"spewer.", (kz_term:to_binary(AccountId))/binary
                                                     ,".", (kz_term:to_binary(Entity))/binary, ".", (kz_term:to_binary(EntityId))/binary
                                                     ,".", (kz_term:to_binary(Event))/binary>>).
 
--define(DEFAULT_HEADERS, [<<"Account-ID">>, <<"Timestamp">>, <<"Event-ID">>, <<"Entity-Type">>, <<"Entity-ID">>]).
--define(DEFAULT_VALUES, [{<<"App-Name">>, ?APP_NAME}
-                        ,{<<"App-Version">>, ?APP_VERSION}
-                        ,{<<"Event-Category">>, <<"spewer">>}
-                        ]).
+-define(DEFAULT_HEADERS, [<<"Account-ID">>, <<"Timestamp">>, <<"Event-ID">>, <<"Entity-Type">>, <<"Entity-ID">>, <<"Caller-Call-ID">>]).
+-define(DEFAULT_VALUES, [{<<"Event-Category">>, <<"spewer">>}]).
 
 -define(USER_ID_HEADERS, [<<"Caller-User-ID">>, <<"Callee-User-ID">>]).
 -define(DEVICE_ID_HEADERS, [<<"Caller-Device-ID">>, <<"Callee-Device-ID">>]).
@@ -230,7 +229,7 @@ publish_calling(Props) ->
                                    ,<<"Callee-Device-ID">>
                                    | ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS]).
 -define(ANSWERED_VALUES, [{<<"Event-Name">>, ?ANSWERED_EVENT_NAME}
-                        | ?DEFAULT_VALUES]).
+                         | ?DEFAULT_VALUES]).
 -define(ANSWERED_TYPES, []).
 
 -spec answered(api_terms()) -> {'ok', iolist()} | {'error', string()}.
@@ -253,3 +252,67 @@ publish_answered(Props) ->
     send_entity_events(<<"device">>, NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME),
     send_entity_events(<<"callflow">>, NewProps, ?ANSWERED_VALUES, fun answered/1, ?ANSWERED_EVENT_NAME).
 %%--------------------------------------------------------------------
+%%--------------------------------------------------------------------
+-define(HANGUP_EVENT_NAME, <<"hangup">>).
+-define(HANGUP_HEADERS, [<<"Reason">>
+                            %%,<<"Callee-Call-ID">>
+                            | ?DEFAULT_HEADERS]).
+-define(OPTIONAL_HANGUP_HEADERS, [<<"Callee-User-ID">>
+                                     ,<<"Callee-Device-ID">>
+                                     | ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS]).
+-define(HANGUP_VALUES, [{<<"Event-Name">>, ?HANGUP_EVENT_NAME}
+                           | ?DEFAULT_VALUES]).
+-define(HANGUP_TYPES, []).
+
+-spec hangup(api_terms()) -> {'ok', iolist()} | {'error', string()}.
+hangup(Prop) when is_list(Prop) ->
+    case hangup_v(Prop) of
+        'true' -> kz_api:build_message(Prop, ?HANGUP_HEADERS, ?OPTIONAL_HANGUP_HEADERS);
+        'false' -> {'error', "Proplist failed validation"}
+    end;
+hangup(JObj) -> hangup(kz_json:to_proplist(JObj)).
+
+-spec hangup_v(api_terms()) -> boolean().
+hangup_v(Prop) when is_list(Prop) ->
+    kz_api:validate(Prop, ?HANGUP_HEADERS, ?HANGUP_VALUES, ?HANGUP_TYPES);
+hangup_v(JObj) -> hangup_v(kz_json:to_proplist(JObj)).
+
+-spec publish_hangup(api_terms()) -> 'ok'.
+publish_hangup(Props) ->
+    NewProps = extra_props(Props),
+    send_entity_events(<<"user">>, NewProps, ?HANGUP_VALUES, fun hangup/1, ?HANGUP_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?HANGUP_VALUES, fun hangup/1, ?HANGUP_EVENT_NAME),
+    send_entity_events(<<"callflow">>, NewProps, ?HANGUP_VALUES, fun hangup/1, ?HANGUP_EVENT_NAME).
+%%--------------------------------------------------------------------
+%%--------------------------------------------------------------------
+-define(CALLEE_BUSY_EVENT_NAME, <<"callee_busy">>).
+-define(CALLEE_BUSY_HEADERS, %%,<<"Callee-Call-ID">>
+                             ?DEFAULT_HEADERS).
+-define(OPTIONAL_CALLEE_BUSY_HEADERS, [<<"Callee-User-ID">>
+                                      ,<<"Callee-Device-ID">>
+                                      | ?USER_ID_HEADERS ++ ?DEVICE_ID_HEADERS]).
+-define(CALLEE_BUSY_VALUES, [{<<"Event-Name">>, ?CALLEE_BUSY_EVENT_NAME}
+                           | ?DEFAULT_VALUES]).
+-define(CALLEE_BUSY_TYPES, []).
+
+-spec callee_busy(api_terms()) -> {'ok', iolist()} | {'error', string()}.
+callee_busy(Prop) when is_list(Prop) ->
+    case callee_busy_v(Prop) of
+        'true' -> kz_api:build_message(Prop, ?CALLEE_BUSY_HEADERS, ?OPTIONAL_CALLEE_BUSY_HEADERS);
+        'false' -> {'error', "Proplist failed validation"}
+    end;
+callee_busy(JObj) -> callee_busy(kz_json:to_proplist(JObj)).
+
+-spec callee_busy_v(api_terms()) -> boolean().
+callee_busy_v(Prop) when is_list(Prop) ->
+    kz_api:validate(Prop, ?CALLEE_BUSY_HEADERS, ?CALLEE_BUSY_VALUES, ?CALLEE_BUSY_TYPES);
+callee_busy_v(JObj) -> callee_busy_v(kz_json:to_proplist(JObj)).
+
+-spec publish_callee_busy(api_terms()) -> 'ok'.
+publish_callee_busy(Props) ->
+    NewProps = extra_props(Props),
+    send_entity_events(<<"user">>, NewProps, ?CALLEE_BUSY_VALUES, fun callee_busy/1, ?CALLEE_BUSY_EVENT_NAME),
+    send_entity_events(<<"device">>, NewProps, ?CALLEE_BUSY_VALUES, fun callee_busy/1, ?CALLEE_BUSY_EVENT_NAME),
+    send_entity_events(<<"callflow">>, NewProps, ?CALLEE_BUSY_VALUES, fun callee_busy/1, ?CALLEE_BUSY_EVENT_NAME).
+%%--------------------------------------------------------------------
+
