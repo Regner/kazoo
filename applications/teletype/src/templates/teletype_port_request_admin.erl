@@ -11,6 +11,7 @@
 -export([init/0
         ,handle_req/1
         ]).
+-export([find_port_authority/2]).
 
 -include("teletype.hrl").
 
@@ -162,5 +163,13 @@ find_port_authority(MasterAccountId, AccountId) ->
             find_port_authority(MasterAccountId, ResellerId);
         {'ok', JObj} ->
             lager:debug("using account ~s for port authority", [AccountId]),
-            kzd_whitelabel:port_authority(JObj)
+            PortAuthority = kzd_whitelabel:port_authority(JObj),
+            case kz_term:is_empty(PortAuthority) of
+                'true' ->
+                    ResellerId = kz_services:get_reseller_id(AccountId),
+                    lager:debug("whitelabel exists for ~s, but has no port authority. checking ~s", [AccountId, ResellerId]),
+                    find_port_authority(MasterAccountId, ResellerId);
+                'false' ->
+                    PortAuthority
+            end
     end.
