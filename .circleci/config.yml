@@ -126,7 +126,7 @@ jobs:
       - image: circleci/python:3.6.5-jessie
     steps:
       - checkout
-      - run: ./scripts/sync-upstream-git.sh 4.1
+      - run: ./scripts/sync-upstream-git.sh master
 
   upstream_sync_41:
     working_directory: ~/2600hz/kazoo
@@ -134,7 +134,7 @@ jobs:
       - image: circleci/python:3.6.5-jessie
     steps:
       - checkout
-      - run: ./scripts/sync-upstream-git.sh master
+      - run: ./scripts/sync-upstream-git.sh 4.1
 
   upstream_sync_42:
     working_directory: ~/2600hz/kazoo
