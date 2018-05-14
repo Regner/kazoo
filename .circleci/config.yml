@@ -141,7 +141,7 @@ workflows:
       - upstream_sync
     triggers:
       - schedule:
-          cron: "26 * * * *"
+          cron: "30 * * * *"
           filters:
             branches:
               only:

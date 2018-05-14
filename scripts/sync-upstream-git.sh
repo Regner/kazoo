@@ -87,9 +87,7 @@ pr_upstream() {
 # Quick test to see if we should run this script. If you're
 # trying to debug/run this script in your repo add your
 # username for circleci to this section.
-VALID_USERNAMES="Regner OpenTelecom"
-
-if [[ "$CIRCLE_PROJECT_USERNAME" =~ ^(Regner|OpenTelecom)$ ]]; then
+if [[ "$CIRCLE_PROJECT_USERNAME" =~ ^(regner|OpenTelecom)$ ]]; then
     echo "$CIRCLE_PROJECT_USERNAME is in the list of repos to run against..."
 else
     echo "$CIRCLE_PROJECT_USERNAME is not in the list of repos to run against. Aborting."
