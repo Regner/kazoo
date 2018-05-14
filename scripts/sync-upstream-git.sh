@@ -11,7 +11,12 @@ IFS=$'\n'
 
 update_branch() {
     echo "Updating $1 branch..."
-    git checkout -b $1 origin/$1
+    if [[ "$1" == "master" ]]; then
+        git checkout $1
+    else
+        git checkout -b $1 origin/$1
+    fi
+
     git reset --hard $1
     git merge upstream/$1 --no-edit
     git push origin $1
