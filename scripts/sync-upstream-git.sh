@@ -5,6 +5,8 @@
 # - GITHUB_ACCOUNT: Account name to use when creating PR requests
 # - GITHUB_TOKEN: Personal access token for the GITHUB_ACCOUNT
 
+set -e
+
 IFS=$'\n'
 
 update_branch() {
