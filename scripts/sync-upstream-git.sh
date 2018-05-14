@@ -11,8 +11,8 @@ IFS=$'\n'
 
 update_branch() {
     echo "Updating $1 branch..."
-    git checkout $1
-    git reset --hard $1
+    git checkout -b origin/$1
+    git reset --hard origin/$1
     git merge upstream/$1
     git push origin $1
 }
