@@ -39,8 +39,8 @@ cleanup() {
     # Doing this for debug purposes, if we need to debug the script
     # then we need to be back on the otf branch as that is the only
     # place the script exists.
-    git checkout origin/otf-master
-    git reset --hard HEAD
+    git checkout otf-master
+    git reset --hard otf-master
 }
 
 generate_pr_post_body() {
