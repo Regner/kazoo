@@ -120,21 +120,29 @@ jobs:
     - store_artifacts:
         path: /tmp/circleci-test-results
 
-  upstream_sync:
+  upstream_sync_master:
     working_directory: ~/2600hz/kazoo
     docker:
       - image: circleci/python:3.6.5-jessie
     steps:
       - checkout
-      - run:
-          command: ./scripts/sync-upstream-git.sh master
-          halt_build_on_fail: false
-      - run:
-          command: ./scripts/sync-upstream-git.sh 4.1
-          halt_build_on_fail: false
-      - run:
-          command: ./scripts/sync-upstream-git.sh 4.2
-          halt_build_on_fail: false
+      - run: ./scripts/sync-upstream-git.sh 4.1
+
+  upstream_sync_41:
+    working_directory: ~/2600hz/kazoo
+    docker:
+      - image: circleci/python:3.6.5-jessie
+    steps:
+      - checkout
+      - run: ./scripts/sync-upstream-git.sh master
+
+  upstream_sync_42:
+    working_directory: ~/2600hz/kazoo
+    docker:
+      - image: circleci/python:3.6.5-jessie
+    steps:
+      - checkout
+      - run: ./scripts/sync-upstream-git.sh 4.2
 
 workflows:
   version: 2
@@ -144,10 +152,12 @@ workflows:
 
   nightly:
     jobs:
-      - upstream_sync
+      - upstream_sync_master
+      - upstream_sync_41
+      - upstream_sync_42
     triggers:
       - schedule:
-          cron: "46 * * * *"
+          cron: "56 * * * *"
           filters:
             branches:
               only:
