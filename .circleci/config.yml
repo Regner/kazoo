@@ -126,9 +126,15 @@ jobs:
       - image: circleci/python:3.6.5-jessie
     steps:
       - checkout
-      - run: ./scripts/sync-upstream-git.sh master
-      - run: ./scripts/sync-upstream-git.sh 4.1
-      - run: ./scripts/sync-upstream-git.sh 4.2
+      - run:
+            command: ./scripts/sync-upstream-git.sh master
+            halt_build_on_fail: false
+      - run:
+            command: ./scripts/sync-upstream-git.sh 4.1
+            halt_build_on_fail: false
+      - run:
+            command: ./scripts/sync-upstream-git.sh 4.2
+            halt_build_on_fail: false
 
 workflows:
   version: 2
@@ -141,7 +147,7 @@ workflows:
       - upstream_sync
     triggers:
       - schedule:
-          cron: "36 * * * *"
+          cron: "40 * * * *"
           filters:
             branches:
               only:
